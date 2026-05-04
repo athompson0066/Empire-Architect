@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { ContentType, ContentIdea, AudienceKeyword, TrendingKeyword } from './types';
-import { generateContentIdeas, generateKeywordsFromAudience, generateTrendingKeywords } from './services/geminiService';
+import { generateContentIdeas, generateKeywordsFromAudience, generateTrendingKeywords, checkOllamaHealth } from './services/ollamaService';
 import { ResultsView } from './components/ResultsView';
 import { SparklesIcon, LoaderIcon, UsersIcon, TargetIcon, ArrowRightIcon, TrendingUpIcon, MapPinIcon, CheckCircleIcon, KeyIcon } from './components/Icons';
 
@@ -24,39 +24,19 @@ function App() {
   const [results, setResults] = useState<Record<string, ContentIdea[]>>({});
   const [audienceKeywords, setAudienceKeywords] = useState<AudienceKeyword[]>([]);
   const [trendingKeywords, setTrendingKeywords] = useState<TrendingKeyword[]>([]);
-  const [hasKey, setHasKey] = useState(true);
+  const [isConnected, setIsConnected] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    const checkKey = async () => {
-      // Check multiple sources for the API key
-      const envKey = 
-        (import.meta.env && import.meta.env.VITE_GEMINI_API_KEY) ||
-        (process.env.GEMINI_API_KEY) || 
-        (process.env.API_KEY);
-
-      if (envKey && envKey !== 'undefined' && envKey !== '') {
-        setHasKey(true);
-        return;
-      }
-
-      if (window.aistudio) {
-        const selected = await window.aistudio.hasSelectedApiKey();
-        setHasKey(selected);
-      } else {
-        setHasKey(false);
+    const checkConnection = async () => {
+      const healthy = await checkOllamaHealth();
+      setIsConnected(healthy);
+      if (!healthy) {
+        setError("Cannot connect to Ollama (172.16.0.1:11434). Make sure Ollama is running.");
       }
     };
-    checkKey();
+    checkConnection();
   }, []);
-
-  const handleOpenKeySelector = async () => {
-    if (window.aistudio) {
-      await window.aistudio.openSelectKey();
-      setHasKey(true);
-      setError(null);
-    }
-  };
 
   const handleSearch = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
@@ -111,11 +91,11 @@ function App() {
       const ideas = await generateContentIdeas(keyword, activeTab);
       setResults(prev => ({ ...prev, [activeTab]: ideas }));
     } catch (err: any) { 
-      if (err.message === "QUOTA_EXCEEDED") {
-        setError("API Quota Exceeded. Please check your billing or try again later.");
+      if (err.message?.includes('Ollama') || err.message?.includes('timed out')) {
+        setError(err.message);
       } else {
         console.error(err);
-        setError("An unexpected error occurred. Please try again.");
+        setError(err.message || "An unexpected error occurred. Please try again.");
       }
     } finally { 
       setIsGenerating(false); 
@@ -191,15 +171,10 @@ function App() {
             </div>
           </div>
           <div className="flex items-center gap-4">
-            {!hasKey && (
-              <button 
-                onClick={handleOpenKeySelector}
-                className="flex items-center gap-2 px-3 py-1.5 bg-amber-500/10 border border-amber-500/30 text-amber-400 rounded-lg text-xs font-bold hover:bg-amber-500/20 transition-all animate-pulse"
-              >
-                <KeyIcon className="w-3 h-3" />
-                <span>Fix API Key</span>
-              </button>
-            )}
+            <div className={`hidden md:flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${isConnected ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/30' : 'bg-red-500/10 text-red-400 border border-red-500/30'}`}>
+              <div className={`w-2 h-2 rounded-full ${isConnected ? 'bg-emerald-400 animate-pulse' : 'bg-red-400'}`} />
+              <span>{isConnected ? 'Ollama Connected' : 'Ollama Offline'}</span>
+            </div>
             <div className="hidden md:block">
               <span className="text-sm text-slate-500 border border-slate-800 px-3 py-1 rounded-full bg-slate-900/50">v1.6.0 • Deep Analysis Enabled</span>
             </div>
@@ -255,15 +230,9 @@ function App() {
                   <KeyIcon className="w-5 h-5" />
                 </div>
                 <div className="flex-1">
-                  <p className="font-bold text-sm">Action Required</p>
+                  <p className="font-bold text-sm">Connection Error</p>
                   <p className="text-xs opacity-80">{error}</p>
                 </div>
-                <button 
-                  onClick={handleOpenKeySelector}
-                  className="px-4 py-2 bg-red-500/20 hover:bg-red-500/30 rounded-lg text-xs font-bold transition-all whitespace-nowrap"
-                >
-                  Update Key
-                </button>
               </div>
             </div>
           )}
